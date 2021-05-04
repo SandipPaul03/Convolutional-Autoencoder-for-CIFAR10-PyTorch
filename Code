@@ -1,0 +1,139 @@
+## Import Libraries
+
+import random
+import torch
+from   torch.autograd import Variable
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+import torchvision
+from torchvision.datasets import CIFAR10
+import torchvision.transforms as transforms
+from torch.utils.data import random_split
+from torch.utils.data import DataLoader
+
+## Download Dataset
+
+dataset = CIFAR10(root = 'data/', download = True)
+
+## Training and Test datasets
+
+dataset = CIFAR10(root = 'data/', train = True, transform = transforms.ToTensor())
+ 
+test = CIFAR10(root = 'data/', train = False, transform = transforms.ToTensor())
+
+## Dataloader for iteration during training
+
+batch_size = 128
+
+train_loader = DataLoader(dataset, batch_size, shuffle=True, drop_last=True)
+
+
+## AutoEncoder Structure:
+
+class autoEncoder(nn.Module):
+    def __init__(self):
+        super(autoEncoder, self).__init__()
+        #self.channel = channel
+        self.encoder1 = nn.Sequential(
+            nn.Conv2d(3, 16, 3, stride=1, padding=0),  # b, 16, 30, 30
+            nn.ReLU(True),
+            nn.MaxPool2d(2, stride=2, return_indices= True)
+            ) # b, 16, 15, 15
+        
+        self.encoder2 = nn.Sequential(
+            nn.Conv2d(16, 8, 4, stride=1, padding=0),  # b, 8, 12, 12
+            nn.ReLU(True),
+            nn.MaxPool2d(2, stride=2, return_indices= True),  # b, 8, 6, 6
+        )
+
+
+        self.encoder_linear = nn.Linear(288,600)
+        self.decoder_Linear1 = nn.Linear(600,288)
+        self.flatten = nn.Flatten()
+        self.unpool = nn.MaxUnpool2d(2, stride=2, padding=0)
+        
+
+        self.decoder1 = nn.Sequential(
+            # (128, 8, 12, 12) after maxUnPool1
+            nn.ReLU(True),
+            nn.ConvTranspose2d(8, 16, 4, stride=1, output_padding=0),  # b, 16, 14, 14
+            nn.ReLU(True)
+        )
+
+        self.decoder2 = nn.Sequential(
+            nn.ReLU(True),
+            nn.ConvTranspose2d(16,3,3,stride = 1),
+            nn.Tanh()   
+        )
+
+    def forward(self, x):
+        #self.weight = nn.Parameter(torch.randn(128,600,288))
+        x, indices1 = self.encoder1(x)
+        #print("encoded shape1",x.shape)
+        
+
+        x, indices2 = self.encoder2(x)
+        #print("encoded shape2",x.shape)
+
+        x = self.flatten(x)
+        #print("flatten size", x.shape)
+        
+        x = self.encoder_linear(x)
+        #print("final encoder",x.shape)
+        
+        x = self.decoder_Linear1(x)
+        #print("Decoder linear",x.shape)
+
+        x = x.reshape(-1,8,6,6)
+        #print("Decoder Reshape",x.shape)
+
+        x = self.unpool(x, indices2)
+        #print("unpool shape",x.shape)
+
+        x = self.decoder1(x)
+        #print(x.shape)
+
+        x = self.unpool(x, indices1)
+
+        x = self.decoder2(x)
+        return x
+
+
+## Training Epochs:
+
+IMAGE_WIDTH = IMAGE_HEIGHT = dataset[0][0].shape[1]
+IMAGE_SIZE = IMAGE_WIDTH * IMAGE_HEIGHT
+ 
+# Hyperparameters
+epochs = 20
+lr = 0.002
+ 
+ 
+# Instantiate model
+
+model = autoEncoder()
+loss_fn = nn.MSELoss()
+optimizer = optim.Adamax(model.parameters(), lr=lr, betas = (0.9,0.999))
+
+total_loss = 0
+
+# Training loop
+for epoch in range(epochs):
+    print("Epoch %d" % epoch)
+    
+    for images in train_loader:
+        images,_ = images
+        out = model(Variable(images))
+        
+        optimizer.zero_grad()
+        loss = loss_fn(out, images)
+        loss.backward()
+        optimizer.step()
+        
+    print("Loss = %.3f" % loss.item())
+    total_loss += loss.data
+    
+    
+    
+  
